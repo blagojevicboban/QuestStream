@@ -25,8 +25,8 @@ from .image_processing import yuv_to_rgb, filter_depth
 
 class ReconstructionThread(threading.Thread):
     """
-    Worker thread that handles the 3D reconstruction process.
-    Iterates through frames, processes images, and integrates them into the TSDF volume.
+    Worker thread that handles the 3D reconstruction process for Quest data.
+    Uses QuestReconstructionPipeline to process YUV images and raw depth.
     """
     def __init__(self, data_dir, config_manager, on_progress=None, on_status=None, on_log=None, on_finished=None, on_error=None):
         super().__init__()
@@ -41,98 +41,45 @@ class ReconstructionThread(threading.Thread):
 
     def run(self):
         try:
-            if self.on_status: self.on_status("Initializing Reconstructor...")
-            if self.on_log: self.on_log("Initializing Reconstructor...")
-            reconstructor = QuestReconstructor(self.config_manager)
+            from modules.quest_reconstruction_pipeline import QuestReconstructionPipeline
             
-            # Load frames.json
-            if self.on_log: self.on_log(f"Loading frames from {self.data_dir}")
-            frames_path = os.path.join(self.data_dir, "frames.json")
-            with open(frames_path, "r") as f:
-                frames_data = json.load(f)
+            if self.on_status:
+                self.on_status("Initializing Quest Reconstruction Pipeline...")
+            if self.on_log:
+                self.on_log("Initializing Quest Reconstruction Pipeline...")
             
-            if isinstance(frames_data, list):
-                pass
-            elif isinstance(frames_data, dict) and "frames" in frames_data:
-                frames_data = frames_data["frames"]
+            # Create pipeline
+            pipeline = QuestReconstructionPipeline(self.data_dir, self.config_manager)
             
-            total_frames = len(frames_data)
+            # Run reconstruction
+            result = pipeline.run_reconstruction(
+                on_progress=lambda p: (
+                    self.on_progress(p / 100.0) if self.on_progress else None,
+                    self.on_status(f"Processing: {p}%") if self.on_status else None
+                ),
+                on_log=self.on_log,
+                camera='left',
+                frame_interval=5  # Every 5th frame for performance
+            )
             
-            for i, frame in enumerate(frames_data):
-                if not self._is_running:
-                    break
-                
-                timestamp = frame.get("timestamp")
-                
-                if "file_path" in frame:
-                    img_path = os.path.join(self.data_dir, frame["file_path"])
-                    depth_path = img_path.replace("raw_images", "depth_maps").replace(".jpg", ".png").replace(".bin", ".bin") 
-                else:
-                    base_img = os.path.join(self.data_dir, "raw_images", str(timestamp))
-                    if os.path.exists(base_img + ".bin"): img_path = base_img + ".bin"
-                    elif os.path.exists(base_img + ".yuv"): img_path = base_img + ".yuv"
-                    else: img_path = None
-                    
-                    base_depth = os.path.join(self.data_dir, "depth_maps", str(timestamp))
-                    if os.path.exists(base_depth + ".bin"): depth_path = base_depth + ".bin"
-                    elif os.path.exists(base_depth + ".depth"): depth_path = base_depth + ".depth"
-                    else: depth_path = None
-
-                if not img_path or not os.path.exists(img_path):
-                    if self.on_log: self.on_log(f"Skipping frame {i}: Image not found {img_path}")
-                    continue
-
-                intrinsics_data = frame.get("intrinsics")
-                if isinstance(intrinsics_data, list) and len(intrinsics_data) == 4:
-                    fx, fy, cx, cy = intrinsics_data
-                    intrinsics = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]])
-                    w, h = int(cx * 2), int(cy * 2)
-                elif isinstance(intrinsics_data, dict):
-                    fx = intrinsics_data.get("fx", 0)
-                    fy = intrinsics_data.get("fy", 0)
-                    cx = intrinsics_data.get("cx", 0)
-                    cy = intrinsics_data.get("cy", 0)
-                    intrinsics = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]])
-                    w, h = int(cx * 2), int(cy * 2)
-                else:
-                    if self.on_log: self.on_log(f"Skipping frame {i}: Invalid intrinsics format")
-                    continue
-
-                pose_data = frame.get("pose")
-                pose = np.array(pose_data).reshape(4, 4)
-
-                with open(img_path, 'rb') as f:
-                    yuv_data = np.frombuffer(f.read(), dtype=np.uint8)
-                    yuv_img = yuv_data.reshape((int(h * 1.5), w))
-                    rgb = yuv_to_rgb(yuv_img)
-
-                with open(depth_path, 'rb') as f:
-                    depth_data = np.frombuffer(f.read(), dtype=np.uint16)
-                    if depth_data.size != w * h:
-                        f.seek(0)
-                        depth_data = np.frombuffer(f.read(), dtype=np.float32)
-                    
-                    depth = depth_data.reshape((h, w))
-
-                if self.config_manager.get("reconstruction.use_confidence_filtered_depth"):
-                    depth = filter_depth(depth)
-
-                reconstructor.integrate_frame(rgb, depth, intrinsics, pose)
-                
-                msg = f"Processed frame {i+1}/{total_frames}"
-                if self.on_status: self.on_status(msg)
-                if self.on_log: self.on_log(msg)
-                if self.on_progress: self.on_progress((i + 1) / total_frames)
-                
-            if self.on_log: self.on_log("Extracting Mesh...")
-            if self.on_status: self.on_status("Extracting Mesh...")
-            mesh = reconstructor.extract_mesh()
-            if self.on_log: self.on_log(f"Mesh extraction complete. Vertices: {len(mesh.vertices)}")
-            if self.on_finished: self.on_finished(mesh)
-            
+            if result and result.get('mesh'):
+                mesh = result['mesh']
+                if self.on_log:
+                    self.on_log(f"✓ Reconstruction complete!")
+                    if hasattr(mesh, 'vertices'):
+                        self.on_log(f"  Vertices: {len(mesh.vertices)}")
+                if self.on_finished:
+                    self.on_finished(mesh)
+            else:
+                if self.on_error:
+                    self.on_error("Reconstruction failed - no mesh generated")
+        
         except Exception as e:
-            if self.on_error: self.on_error(str(e))
-            if self.on_log: self.on_log(f"ERROR: {str(e)}")
+            if self.on_error:
+                self.on_error(str(e))
+            if self.on_log:
+                self.on_log(f"ERROR: {str(e)}")
+
 
     def stop(self):
         self._is_running = False
@@ -178,6 +125,22 @@ def main(page: ft.Page):
         temp_dir = path
         progress_bar.visible = False
         status_text.value = f"Extracted to {path}"
+        add_log(f"Extraction complete: {path}")
+        
+        # Check if this is Quest format (no frames.json)
+        frames_json = os.path.join(path, "frames.json")
+        if not os.path.exists(frames_json):
+            add_log("Quest format detected - converting to frames.json...")
+            try:
+                from modules.quest_adapter import QuestDataAdapter
+                frames_json_path = QuestDataAdapter.adapt_quest_data(path)
+                add_log(f"✓ Created frames.json")
+                add_log(f"Quest data successfully converted!")
+            except Exception as e:
+                add_log(f"ERROR converting Quest data: {str(e)}")
+                show_msg(f"Failed to convert Quest data: {str(e)}")
+                return
+        
         btn_process.disabled = False
         show_msg("Data loaded successfully.")
 
@@ -221,6 +184,45 @@ def main(page: ft.Page):
     file_picker = ft.FilePicker()
     file_picker.on_result = load_zip_result
     page.overlay.append(file_picker)
+
+    def load_folder_result(e: ft.FilePickerResultEvent):
+        if e.path:
+            folder_path = e.path
+            log_list.controls.clear()
+            add_log(f"Selected folder: {folder_path}")
+            
+            status_text.value = "Processing folder..."
+            page.update()
+            
+            # Use the folder directly (no extraction needed)
+            nonlocal temp_dir
+            temp_dir = folder_path
+            add_log(f"Using folder: {folder_path}")
+            
+            # Check if this is Quest format (no frames.json)
+            frames_json = os.path.join(folder_path, "frames.json")
+            if not os.path.exists(frames_json):
+                add_log("Quest format detected - converting to frames.json...")
+                try:
+                    from modules.quest_adapter import QuestDataAdapter
+                    frames_json_path = QuestDataAdapter.adapt_quest_data(folder_path)
+                    add_log(f"✓ Created frames.json")
+                    add_log(f"Quest data successfully converted!")
+                except Exception as e:
+                    add_log(f"ERROR converting Quest data: {str(e)}")
+                    show_msg(f"Failed to convert Quest data: {str(e)}")
+                    status_text.value = "Failed to process folder"
+                    page.update()
+                    return
+            
+            status_text.value = f"Loaded folder: {folder_path}"
+            btn_process.disabled = False
+            page.update()
+            show_msg("Folder loaded successfully.")
+
+    folder_picker = ft.FilePicker()
+    folder_picker.on_result = load_folder_result
+    page.overlay.append(folder_picker)
 
     def on_reconstruct_progress(val):
         progress_bar.value = val
@@ -321,6 +323,10 @@ def main(page: ft.Page):
             ft.ElevatedButton("Load ZIP", icon=ft.Icons.UPLOAD_FILE, on_click=lambda _: file_picker.pick_files(
                 dialog_title="Open Quest Capture ZIP",
                 allowed_extensions=["zip"],
+                initial_directory="D:\\METAQUEST" if os.path.exists("D:\\METAQUEST") else None
+            )),
+            ft.ElevatedButton("Load Folder", icon=ft.Icons.FOLDER_OPEN, on_click=lambda _: folder_picker.get_directory_path(
+                dialog_title="Open Extracted Quest Data Folder",
                 initial_directory="D:\\METAQUEST" if os.path.exists("D:\\METAQUEST") else None
             )),
             btn_process,

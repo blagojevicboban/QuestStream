@@ -3,3 +3,4 @@ flet-desktop==0.26.0
 numpy
 opencv-python
 pyyaml
+open3d>=0.18.0
