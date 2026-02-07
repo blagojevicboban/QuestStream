@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/banner.png" width="800" alt="QuestStream 3D Banner">
+  <img src="assets/banner2.png" width="800" alt="QuestStream 3D Banner">
 </p>
 
 # <p align="center">🥽 QuestStream 3D Processor</p>
