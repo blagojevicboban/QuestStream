@@ -1,79 +1,98 @@
-# QuestStream 3D Processor
+# 🥽 QuestStream 3D Processor
 
-QuestStream je moćan Python alat za rekonstrukciju 3D modela iz podataka snimljenih putem **Meta Quest 3** headseta. Aplikacija procesira RGB slike, depth mape i podatke o poziciji kamere kako bi generisala visokokvalitetne 3D meševe koristeći TSDF (Truncated Signed Distance Function) integraciju.
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![UI: Flet](https://img.shields.io/badge/UI-Flet/Flutter-02569B.svg)](https://flet.dev/)
+[![Engine: Open3D](https://img.shields.io/badge/Engine-Open3D-green.svg)](http://www.open3d.org/)
 
-## Glavne Funkcionalnosti
+**QuestStream** je premium alat za rekonstrukciju 3D scena visokog kvaliteta direktno iz podataka snimljenih putem **Meta Quest 3** headset-a. Koristeći naprednu volumetrijsku integraciju (TSDF), QuestStream pretvara sirove YUV slike i depth mape u detaljne, teksturirane 3D modele.
 
--   **Moderan UI**: Korisnički interfejs izgrađen pomoću **Flet** (Flutter for Python) sa tamnom temom.
--   **Validacija Podataka**: Automatska provera integriteta ZIP fajlova pre ekstrakcije.
--   **Prošireni Logovi**: Detaljan ispis svih procesa (raspakivanje, procesiranje frejmova, ekstrakcija modela) sa vremenskim markerima.
--   **3D Rekonstrukcija**: Optimizovana integracija frejmova koristeći ScalableTSDFVolume.
--   **Vizuelizacija**: Integrisani Open3D pregledač za inspekciju generisanog modela.
--   **Konfiguracija**: Lako podešavanje parametara (voxel size, max depth) direktno u aplikaciji.
+---
 
-## Preduslovi
+## ✨ Glavne Funkcionalnosti
 
--   Windows 10/11
--   Python 3.10 ili 3.11 (Preporučeno zbog podrške za `open3d`)
--   Meta Quest 3 podaci u ZIP formatu
+- 🚀 **Asinhroni Pipeline**: Brza obrada podataka bez zamrzavanja interfejsa.
+- 🎨 **Modern Deep UI**: Elegantan interfejs izgrađen pomoću **Flet** platforme sa dinamičkim progres barovima.
+- 🛠️ **Napredna Obrada**:
+  - **YUV_420_888 Conversion**: Automatska konverzija Quest sirovih formata u RGB.
+  - **Depth Optimization**: Filtriranje šuma, Infinity/NaN vrednosti i precizno skaliranje dubine.
+- 🌐 **Scalable TSDF**: Rekonstrukcija velikih scena uz minimalnu potrošnju memorije.
+- 🔍 **Real-time Logging**: Detaljan uvid u svaki korak procesa direktno u aplikaciji.
+- 🖼️ **Interactive Visualizer**: Eksterna inspekcija modela sa podrškom za rotaciju, zoom i promenu shading-a.
 
-## Instalacija
+---
 
-1.  **Klonirajte repozitorijum:**
-    ```bash
-    git clone https://github.com/yourusername/QuestStream.git
-    cd QuestStream
-    ```
+## 🛠️ Tehnološki Stack
 
-2.  **Kreirajte virtuelno okruženje:**
-    ```bash
-    python -m venv venv
-    .\venv\Scripts\activate
-    ```
+| Komponenta | Tehnologija |
+| :--- | :--- |
+| **Jezik** | Python 3.11 |
+| **Frontend** | Flet (Flutter based) |
+| **3D Engine** | Open3D |
+| **Computer Vision** | OpenCV & NumPy |
+| **Data Format** | JSON / CSV / YAML |
 
-3.  **Instalirajte zavisnosti:**
-    ```bash
-    pip install -r requirements.txt
-    ```
+---
 
-## Upotreba
+## 🚀 Brzi Početak
 
-1.  **Pokretanje aplikacija:**
-    ```bash
-    python main.py
-    ```
+### 📝 Preduslovi
+- **OS**: Windows 10/11
+- **Python**: 3.11 (Preporučeno)
+- **Podaci**: Quest Capture podaci (ZIP ili raspakovan folder)
 
-2.  **Učitavanje podataka:**
-    -   Kliknite na dugme **Load ZIP**.
-    -   Aplikacija će automatski otvoriti `D:\METAQUEST` ukoliko on postoji.
-    -   ZIP mora sadržati:
-        -   `frames.json`: Meta podaci (intrinsics, pose, timestamps).
-        -   `raw_images/`: Folder sa BIN/YUV slikama.
-        -   `depth_maps/`: Folder sa dubinskim mapama.
+### 💻 Instalacija
+```powershell
+# Klonirajte projekt
+git clone https://github.com/blagojevicboban/QuestStream.git
+cd QuestStream
 
-3.  **Procesiranje:**
-    -   Nakon ekstrakcije, kliknite **Start Reconstruction**.
-    -   Pratite napredak preko progres bara i detaljnih logova na dnu ekrana.
+# Postavljanje okruženja
+python -m venv venv
+.\venv\Scripts\activate
 
-4.  **Pregled:**
-    -   Po završetku, kliknite **Visualizer (External)** da otvorite interaktivni 3D prikaz.
+# Instalacija zavisnosti
+pip install -r requirements.txt
+```
 
-## Projektna Struktura
+### 🎮 Pokretanje
+```powershell
+python main.py
+```
 
--   `main.py`: Ulazna tačka aplikacije.
--   `modules/`:
-    -   `gui.py`: Frontend logika (Flet) i upravljanje procesnim nitima.
-    -   `reconstruction.py`: Implementacija TSDF rekonstrukcije.
-    -   `ingestion.py`: Validacija i asinhrono raspakivanje podataka.
-    -   `image_processing.py`: Obrada slike (YUV -> RGB) i filtriranje dubine.
-    -   `config_manager.py`: Upravljanje podešavanjima putem YAML fajla.
--   `.agent/workflows/app-guide.md`: Detaljan vodič za razvoj i bildovanje.
+---
 
-## Razvoj i Debugging
+## 📂 Struktura Projekta
 
-Za detaljne instrukcije o tome kako se aplikacija debugeuje i bilduje u izvršni fajl, pogledajte:
-`/.agent/workflows/app-guide.md`
+```text
+QuestStream/
+├── main.py            # Ulazna tačka aplikacije
+├── config.yml         # Globalna podešavanja rekonstrukcije
+├── modules/
+│   ├── gui.py         # Flet UI i thread management
+│   ├── reconstruction.py# TSDF Engine (Open3D)
+│   ├── quest_adapter.py # Adaptacija Quest podataka
+│   ├── quest_image_processor.py # YUV/Depth obrada
+│   └── config_manager.py# YAML Config loader
+└── README_QUEST.md    # Detaljna uputstva za Quest 3 pipeline
+```
 
-## Licenca
+---
 
-[MIT License](LICENSE)
+## 🎓 Napredna Upotreba
+
+Za najbolje rezultate pri snimanju sa Meta Quest 3, preporučujemo:
+1. **Frame Interval**: Koristite `1` u Settings za maksimalne detalje.
+2. **Voxel Size**: Postavite na `0.01` ili `0.02` u zavisnosti od procesorske snage.
+3. **Pomeranje**: Krećite se polako i kružite oko objekata radi boljeg preklapanja podataka.
+
+Detaljniji vodič možete pronaći u [README_QUEST.md](./README_QUEST.md).
+
+---
+
+## 📄 Licenca
+
+Ovaj projekat je licenciran pod **MIT Licencom** - pogledajte [LICENSE](LICENSE) za detalje.
+
+---
+*Developed with ❤️ for the Meta Quest Community*
