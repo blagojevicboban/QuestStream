@@ -111,6 +111,35 @@ def main(page: ft.Page):
             log_list.controls.pop(0)
         page.update()
 
+    def get_memory_usage():
+        """Get current memory usage in MB."""
+        import os, subprocess
+        try:
+            # efficient windows approach
+            pid = os.getpid()
+            cmd = f'tasklist /FI "PID eq {pid}" /FO CSV /NH'
+            output = subprocess.check_output(cmd, shell=True).decode()
+            # Parse CSV: "python.exe","55892","Console","1","56,789 K"
+            parts = output.split('","')
+            if len(parts) > 4:
+                mem_str = parts[4].replace('"', '').replace(' K', '').replace(',', '')
+                return int(mem_str) / 1024.0
+        except:
+            return 0.0
+            
+    # Memory Monitor
+    mem_text = ft.Text("RAM: -- MB", size=12, color=ft.Colors.GREY_400)
+    
+    def update_memory_loop():
+        while True:
+            if page.route: # Check if page is active
+                mem = get_memory_usage()
+                mem_text.value = f"RAM: {mem:.1f} MB"
+                page.update()
+            time.sleep(2)
+            
+    threading.Thread(target=update_memory_loop, daemon=True).start()
+
     def show_msg(text):
         page.snack_bar = ft.SnackBar(content=ft.Text(text))
         page.snack_bar.open = True
@@ -228,6 +257,8 @@ def main(page: ft.Page):
         progress_bar.value = val
         page.update()
 
+    thumb_img = ft.Image(src="", width=320, height=240, fit=ft.ImageFit.CONTAIN, visible=False)
+    
     def on_reconstruct_finished(mesh):
         nonlocal current_mesh
         current_mesh = mesh
@@ -236,6 +267,15 @@ def main(page: ft.Page):
         btn_visualize.disabled = False
         add_log(f"Reconstruction finished with {len(mesh.vertices)} vertices.")
         progress_bar.visible = False
+        
+        # Check for thumbnail
+        if temp_dir:
+            thumb_path = os.path.join(temp_dir, "thumbnail.png")
+            if os.path.exists(thumb_path):
+                # Force reload by adding timestamp
+                thumb_img.src = f"{thumb_path}?t={time.time()}" 
+                thumb_img.visible = True
+        
         page.update()
 
     def on_reconstruct_error(err):
@@ -290,9 +330,23 @@ def main(page: ft.Page):
         options=[
             ft.dropdown.Option("left", "Left Camera"),
             ft.dropdown.Option("right", "Right Camera"),
+            ft.dropdown.Option("both", "Stereo (Both)"),
         ]
     )
     filter_check = ft.Checkbox(label="Filter Depth", value=config_manager.get("reconstruction.use_confidence_filtered_depth", True))
+    
+    # Post-Processing & Export
+    smoothing_input = ft.TextField(label="Smoothing Iterations", value=str(config_manager.get("post_processing.smoothing_iterations", 5)))
+    decimation_input = ft.TextField(label="Target Triangles", value=str(config_manager.get("post_processing.decimation_target_triangles", 100000)))
+    export_fmt_dropdown = ft.Dropdown(
+        label="Export Format",
+        value=config_manager.get("export.format", "obj"),
+        options=[
+            ft.dropdown.Option("ply", "PLY (Standard)"),
+            ft.dropdown.Option("obj", "OBJ (Universal)"),
+            ft.dropdown.Option("glb", "GLB (Web/AR)"),
+        ]
+    )
 
     def save_settings(e):
         try:
@@ -301,6 +355,12 @@ def main(page: ft.Page):
             config_manager.set("reconstruction.frame_interval", int(frame_int_input.value))
             config_manager.set("reconstruction.camera", camera_dropdown.value)
             config_manager.set("reconstruction.use_confidence_filtered_depth", filter_check.value)
+            
+            # Post-processing
+            config_manager.set("post_processing.smoothing_iterations", int(smoothing_input.value))
+            config_manager.set("post_processing.decimation_target_triangles", int(decimation_input.value))
+            config_manager.set("export.format", export_fmt_dropdown.value)
+            
             page.close(settings_dialog)
             show_msg("Settings saved")
         except ValueError:
@@ -309,11 +369,19 @@ def main(page: ft.Page):
     settings_dialog = ft.AlertDialog(
         title=ft.Text("Settings"),
         content=ft.Column([
+            ft.Text("Reconstruction Parameters", weight="bold"),
             voxel_input, 
             depth_max_input, 
             frame_int_input,
             camera_dropdown,
-            filter_check
+            filter_check,
+            ft.Divider(),
+            ft.Text("Post-Processing", weight="bold"),
+            smoothing_input,
+            decimation_input,
+            ft.Divider(),
+            ft.Text("Export", weight="bold"),
+            export_fmt_dropdown
         ], tight=True, scroll=ft.ScrollMode.AUTO),
         actions=[
             ft.TextButton("Cancel", on_click=lambda _: page.close(settings_dialog)),
@@ -345,10 +413,13 @@ def main(page: ft.Page):
                 initial_directory="D:\\METAQUEST" if os.path.exists("D:\\METAQUEST") else None
             )),
             btn_process,
-            btn_visualize
+            btn_visualize,
+            ft.Container(content=mem_text, padding=10)
         ]),
         progress_bar,
+        progress_bar,
         status_text,
+        thumb_img,
         ft.Divider(),
         ft.Text("Process Logs:", size=16, weight="bold"),
         ft.Container(

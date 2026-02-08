@@ -132,11 +132,82 @@ class QuestReconstructionPipeline:
             on_log(f"Using camera: {camera}")
             on_log(f"Frame interval: {frame_interval}")
         
-        intrinsics = self.get_camera_intrinsics(camera)
+        
+    def get_camera_extrinsics(self, camera='left'):
+        """
+        Get 4x4 homogenous matrix for Head-to-Camera transform.
+        """
+        # Default extrinsics (approximate Quest 3 IPD ~64mm)
+        # Left eye is roughly -32mm on X, Right is +32mm
+        # TODO: Read from metadata if available (currently falling back to defaults)
+        
+        offset_x = -0.032 if camera == 'left' else 0.032
+        
+        # Identity rotation (assuming cameras are parallel to head forward)
+        # In reality, they might be canted (toed-in).
+        # Metadata check:
+        cam_data = self.camera_metadata.get(camera, {})
+        translation = cam_data.get('translation', [offset_x, 0, 0])
+        rotation = cam_data.get('rotation_quat', [1, 0, 0, 0]) # w, x, y, z
+        
+        # If metadata has translation, use it
+        if 'translation' in cam_data:
+             t = np.array(translation)
+        else:
+             t = np.array([offset_x, 0, 0])
+             
+        # Rotation
+        # If metadata has rotation, convert it. Otherwise Identity.
+        # But for now, let's stick to simple Translation offset default.
+        
+        R = np.eye(3) # Identity
+        
+        H = np.eye(4)
+        H[:3, :3] = R
+        H[:3, 3] = t
+        
+        return H
+
+    def run_reconstruction(
+        self, 
+        on_progress=None, 
+        on_log=None,
+        camera='left',
+        frame_interval=1
+    ):
+        """
+        Run the reconstruction process.
+        
+        Args:
+            on_progress: Callback(percentage: int)
+            on_log: Callback(message: str)
+            camera: 'left', 'right', or 'both'
+            frame_interval: Process every N-th frame (1 = all frames)
+            
+        Returns:
+            Dictionary with reconstruction results
+        """
+        if not self.reconstructor:
+            if on_log:
+                on_log("ERROR: Open3D not available. Cannot run reconstruction.")
+            return None
         
         if on_log:
-            on_log(f"Camera intrinsics:\n  fx={intrinsics[0,0]:.2f}, fy={intrinsics[1,1]:.2f}")
-            on_log(f"  cx={intrinsics[0,2]:.2f}, cy={intrinsics[1,2]:.2f}")
+            on_log(f"Starting reconstruction with {len(self.frames)} frames...")
+            on_log(f"Using camera mode: {camera}")
+            on_log(f"Frame interval: {frame_interval}")
+            
+        cameras_to_process = ['left', 'right'] if camera == 'both' else [camera]
+        
+        intrinsics_map = {cam: self.get_camera_intrinsics(cam) for cam in cameras_to_process}
+        extrinsics_map = {cam: self.get_camera_extrinsics(cam) for cam in cameras_to_process}
+        
+        if on_log:
+            for cam in cameras_to_process:
+                ints = intrinsics_map[cam]
+                on_log(f"[{cam}] Intrinsics: fx={ints[0,0]:.1f}, cx={ints[0,2]:.1f}")
+                exts = extrinsics_map[cam][:3, 3]
+                on_log(f"[{cam}] Extrinsics Offset: {exts}")
         
         # Process frames
         processed_count = 0
@@ -148,46 +219,48 @@ class QuestReconstructionPipeline:
                 on_progress(progress)
             
             if on_log and i % max(1, len(self.frames) // 20) == 0:
-                on_log(f"Processing frame {i+1}/{len(self.frames[::frame_interval])}...")
+                on_log(f"Processing frame set {i+1}/{len(self.frames[::frame_interval])}...")
             
-            # Process frame
-            try:
-                rgb, depth = QuestImageProcessor.process_quest_frame(
-                    str(self.project_dir),
-                    frame,
-                    camera=camera
-                )
-                
-                if rgb is None or depth is None:
-                    if on_log and failed_count < 5:  # Log first 5 failures
-                        on_log(f"⚠ Frame {i} failed: RGB={rgb is not None}, Depth={depth is not None}")
-                        # Try to get more details
-                        yuv_path = self.project_dir / frame['cameras'][camera]['image']
-                        depth_path = self.project_dir / frame['cameras'][camera]['depth']
-                        on_log(f"  YUV exists: {yuv_path.exists()}, path: {yuv_path.name}")
-                        on_log(f"  Depth exists: {depth_path.exists()}, path: {depth_path.name}")
-                    failed_count += 1
-                    continue
-            except Exception as e:
-                if on_log and failed_count < 5:
-                    on_log(f"⚠ Frame {i} exception: {str(e)[:100]}")
-                failed_count += 1
-                continue
-            
-            # Build pose matrix
-            pose = self.build_pose_matrix(
+            # Identify Head Pose
+            head_pose = self.build_pose_matrix(
                 frame['pose']['position'],
                 frame['pose']['rotation']
             )
             
-            # Integrate into TSDF volume
-            try:
-                self.reconstructor.integrate_frame(rgb, depth, intrinsics, pose)
-                processed_count += 1
-            except Exception as e:
-                if on_log:
-                    on_log(f"Error integrating frame {i}: {e}")
-                failed_count += 1
+            # Process each camera
+            for cam in cameras_to_process:
+                try:
+                    rgb, depth = QuestImageProcessor.process_quest_frame(
+                        str(self.project_dir),
+                        frame,
+                        camera=cam
+                    )
+                    
+                    if rgb is None or depth is None:
+                        # Only check logging for failures if single camera mode or significant failure
+                        if on_log and failed_count < 5: 
+                            on_log(f"⚠ [{cam}] Frame {i} failed: RGB={rgb is not None}, Depth={depth is not None}")
+                        failed_count += 1
+                        continue
+                        
+                    # Calculate Camera World Pose
+                    # T_cam_world = T_head_world @ T_head_to_cam
+                    T_head_cam = extrinsics_map[cam]
+                    cam_pose = head_pose @ T_head_cam
+                    
+                    # Integrate
+                    self.reconstructor.integrate_frame(
+                        rgb, 
+                        depth, 
+                        intrinsics_map[cam], 
+                        cam_pose
+                    )
+                    processed_count += 1
+                    
+                except Exception as e:
+                    if on_log and failed_count < 10:
+                        on_log(f"Error processing {cam} frame {i}: {str(e)[:100]}")
+                    failed_count += 1
         
         if on_log:
             on_log(f"Integration complete!")
@@ -201,6 +274,37 @@ class QuestReconstructionPipeline:
         if on_log:
             if hasattr(mesh, 'vertices'):
                 on_log(f"✓ Mesh extracted: {len(mesh.vertices)} vertices")
+                
+                # Save Mesh
+                export_config = self.config.get("export") if self.config else {}
+                fmt = export_config.get("format", "obj")
+                save_mesh = export_config.get("save_mesh", True)
+                
+                if save_mesh:
+                    output_path = self.project_dir / f"reconstruction.{fmt}"
+                    on_log(f"Saving mesh to {output_path}...")
+                    try:
+                        # Open3D supports .ply, .obj, .glb, .gltf natively
+                        o3d.io.write_triangle_mesh(str(output_path), mesh)
+                        on_log(f"✓ Saved successfully.")
+                        
+                        # Generate Thumbnail
+                        try:
+                            on_log("Generating thumbnail...")
+                            vis = o3d.visualization.Visualizer()
+                            vis.create_window(visible=False, width=640, height=480)
+                            vis.add_geometry(mesh)
+                            vis.poll_events()
+                            vis.update_renderer()
+                            thumb_path = self.project_dir / "thumbnail.png"
+                            vis.capture_screen_image(str(thumb_path), do_render=True)
+                            vis.destroy_window()
+                            on_log(f"✓ Thumbnail saved: {thumb_path.name}")
+                        except Exception as e:
+                            on_log(f"⚠ Thumbnail generation failed: {e}")
+                            
+                    except Exception as e:
+                        on_log(f"ERROR saving mesh: {e}")
             else:
                 on_log("⚠ Mesh extraction failed")
         

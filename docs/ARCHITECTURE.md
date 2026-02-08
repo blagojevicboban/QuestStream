@@ -22,9 +22,9 @@ The application is divided into a UI layer and a logic layer (backend) that comm
 - **filter_depth**: Application of a bilateral filter to depth maps for noise reduction before integration.
 
 ### Reconstruction Layer (`modules/reconstruction.py`)
-- Central part of the backend using **Open3D**.
-- **QuestReconstructor**: Initializes `ScalableTSDFVolume`.
-- **Integration**: Converts numerical data into `RGBDImage` and integrates them into 3D space using the pose matrix.
+- Central part of the backend using **Open3D Tensor API**.
+- **QuestReconstructor**: Initializes `VoxelBlockGrid` on GPU (CUDA) if available, falling back to CPU.
+- **Integration**: Converts numerical data into Tensor images and integrates them into the sparse volume.
 
 ## 2. Data Flow
 
@@ -37,7 +37,12 @@ The application is divided into a UI layer and a logic layer (backend) that comm
         - Read BIN/YUV file -> `yuv_to_rgb`.
         - Read Depth file -> `filter_depth` (if configured).
         - Frame is integrated into the `Volume`.
-5. **Finalization**: `extract_mesh()` generates a TriangleMesh object which is sent back to the GUI for visualization.
+        - **Stereo Mode**: If enabled, both Left and Right camera frames are integrated. The system calculates the world pose for each camera using the Head Pose and known Extrinsics (IPD offset).
+5. **Finalization**: 
+    - `extract_mesh()` generates a mesh.
+    - **Post-Processing**: Smoothing and decimation are applied.
+    - **Export**: Mesh is saved as .obj/.glb.
+    - **Thumbnail**: A preview image is captured using an off-screen visualizer.
 
 ## 3. Configuration Management
 

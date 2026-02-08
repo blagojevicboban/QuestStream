@@ -14,4 +14,4 @@ reconstruction:
   trunc_voxel_multiplier: 8.0
   use_confidence_filtered_depth: true
   valid_count_threshold: 4
-  voxel_size: 0.02
+  voxel_size: 0.005

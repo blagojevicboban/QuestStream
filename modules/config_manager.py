@@ -17,8 +17,16 @@ DEFAULT_CONFIG = {
     "ingestion": {
         "validation_checksum": True,
     },
+    "post_processing": {
+        "enable": True,
+        "smoothing_iterations": 5, # Laplacian smoothing
+        "decimation_target_triangles": 100000, # 0 to disable
+        "remove_outliers": True,
+        "outlier_nb_neighbors": 20,
+        "outlier_std_ratio": 2.0
+    },
     "export": {
-        "format": "ply",  # ply, obj, glb
+        "format": "obj",  # ply, obj, glb
         "save_mesh": True,
         "save_pointcloud": False,
     }
