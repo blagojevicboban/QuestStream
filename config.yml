@@ -1,5 +1,5 @@
 export:
-  format: obj
+  format: glb
   save_mesh: true
   save_pointcloud: false
 ingestion:

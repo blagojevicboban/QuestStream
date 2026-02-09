@@ -7,7 +7,7 @@ from threading import Thread
 from datetime import datetime
 
 from .quest_image_processor import QuestImageProcessor
-from .reconstruction import QuestReconstructor, HAS_OPEN3D
+from .reconstruction import QuestReconstructor, HAS_OPEN3D, o3d
 from .config_manager import ConfigManager
 
 
@@ -375,8 +375,16 @@ class QuestReconstructionPipeline:
                     on_log(f"Saving mesh to {output_path}...")
                     try:
                         # Open3D supports .ply, .obj, .glb, .gltf natively
-                        o3d.io.write_triangle_mesh(str(output_path), mesh)
-                        on_log(f"✓ Saved successfully: {output_path.name}")
+                        success = o3d.io.write_triangle_mesh(str(output_path), mesh)
+                        
+                        if success and output_path.exists():
+                            on_log(f"✓ Saved successfully: {output_path.name}")
+                            # Keep output_path defined for return
+                        else:
+                            on_log(f"ERROR: failed to write mesh to {output_path}")
+                            # Remove output_path from locals() logic by ensuring it's not set if failed
+                            # Actually, easier to use a dedicated variable for success
+                            pass
                         
                         # Generate Thumbnail
                         try:
@@ -408,7 +416,8 @@ class QuestReconstructionPipeline:
         return {
             'mesh': mesh,
             'processed_frames': processed_count,
-            'failed_frames': failed_count
+            'failed_frames': failed_count,
+            'output_path': str(output_path) if 'output_path' in locals() and output_path.exists() else None
         }
 
 
