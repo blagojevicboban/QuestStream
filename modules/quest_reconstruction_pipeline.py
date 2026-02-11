@@ -40,18 +40,20 @@ class QuestReconstructionPipeline:
         self.frames = self.data.get('frames', [])
         self.camera_metadata = self.data.get('camera_metadata', {})
         
-    def get_camera_intrinsics(self, camera='left', depth_info=None):
+    def get_camera_intrinsics(self, camera='left', depth_info=None, debug=False):
         """
         Extract camera intrinsics from metadata or use updated info.
         
         Args:
             camera: 'left' or 'right'
             depth_info: Optional dict with 'fov_...' tangents and 'width'/'height'
+            debug: If True, print debug information
         
         Returns:
             3x3 intrinsics matrix
         """
         fx, fy, cx, cy = 0, 0, 0, 0
+        computed_from_fov = False
 
         if depth_info:
             # Use accurate intrinsics from frame metadata
@@ -62,8 +64,19 @@ class QuestReconstructionPipeline:
             t = depth_info.get('fov_top', 0)
             b = depth_info.get('fov_down', 0)
             
-            if w > 0 and h > 0:
-                fx, fy, cx, cy = compute_depth_camera_params(l, r, t, b, w, h)
+            if debug:
+                print(f"  FOV tangents: L={l:.4f}, R={r:.4f}, T={t:.4f}, B={b:.4f}, W={w}, H={h}")
+            
+            if w > 0 and h > 0 and (l + r) > 0.01 and (t + b) > 0.01:
+                fx_temp, fy_temp, cx_temp, cy_temp = compute_depth_camera_params(l, r, t, b, w, h)
+                
+                # Validate computed values - reject if suspiciously low
+                # Quest 3 depth camera typically has focal length around 800-900 pixels
+                if fx_temp > 300 and fy_temp > 300:
+                    fx, fy, cx, cy = fx_temp, fy_temp, cx_temp, cy_temp
+                    computed_from_fov = True
+                elif debug:
+                    print(f"  WARNING: Computed intrinsics rejected (FX={fx_temp:.1f}, FY={fy_temp:.1f})")
         
         if fx == 0:
             # Fallback to global metadata or defaults
@@ -74,6 +87,11 @@ class QuestReconstructionPipeline:
             fy = intrinsics_obj.get('fy', 867.0)
             cx = intrinsics_obj.get('cx', 640.0)
             cy = intrinsics_obj.get('cy', 640.0)
+            
+            if debug:
+                print(f"  Using fallback intrinsics: FX={fx:.1f}, FY={fy:.1f}")
+        elif debug:
+            print(f"  Using computed intrinsics: FX={fx:.1f}, FY={fy:.1f}")
         
         intrinsics = np.array([
             [fx, 0, cx],
@@ -200,10 +218,13 @@ class QuestReconstructionPipeline:
             
             for cam in cameras_to_process:
                 try:
+                    # FIX 1: Map 'color' option to 'left' camera (Quest RGB is left camera)
+                    actual_cam = 'left' if cam == 'color' else cam
+                    
                     rgb, depth, depth_info = QuestImageProcessor.process_quest_frame(
                         str(self.project_dir),
                         frame,
-                        camera=cam
+                        camera=actual_cam
                     )
                     
                     if rgb is None or depth is None:
@@ -211,12 +232,31 @@ class QuestReconstructionPipeline:
                         continue
                      
                     # 1. Get accurate intrinsics
-                    intrinsics = self.get_camera_intrinsics(cam, depth_info)
+                    intrinsics = self.get_camera_intrinsics(cam, depth_info, debug=(i < 5))
+                    
+                    # DEBUG: Check raw depth BEFORE linearization
+                    if i < 5:
+                        raw_valid = depth[depth > 0]
+                        if len(raw_valid) > 0:
+                            msg = f"  RAW Depth: min={np.min(raw_valid):.4f}, max={np.max(raw_valid):.4f}, mean={np.mean(raw_valid):.4f}, pixels={len(raw_valid)}"
+                            print(msg)
+                            if on_log: on_log(msg)
+                        else:
+                            msg = "  RAW Depth: NO VALID PIXELS (all zeros!)"
+                            print(msg)
+                            if on_log: on_log(msg)
                     
                     # 2. Linearize depth
                     if depth_info:
                         near = depth_info.get('near_z', 0.1)
                         far = depth_info.get('far_z', 3.0)
+                        
+                        # DEBUG: Log linearization parameters
+                        if i < 5:
+                            msg = f"  Linearizing depth: near={near:.2f}, far={far:.2f}"
+                            print(msg)
+                            if on_log: on_log(msg)
+                        
                         depth_linear = convert_depth_to_linear(depth, near, far)
                     else:
                         # Fallback: assume depth is already linear or use defaults
@@ -224,6 +264,30 @@ class QuestReconstructionPipeline:
                         # Or it might be meters. Existing code assumed meters.
                         # Let's assume meters to be safe for legacy support.
                         depth_linear = depth
+                    
+                    # FIX 2a: Filter depth range for room scanning (remove noise)
+                    # TEMPORARILY DISABLED - too aggressive, removes all pixels
+                    # depth_linear[depth_linear < 0.2] = 0.0  # Too close (< 20cm)
+                    # depth_linear[depth_linear > 2.5] = 0.0  # Too far for small room (> 2.5m)
+                    
+                    # DEBUG: Log depth distribution to see what values we have
+                    if i < 5:
+                        valid_depth = depth_linear[depth_linear > 0]
+                        if len(valid_depth) > 0:
+                            d_min, d_max, d_mean = np.min(valid_depth), np.max(valid_depth), np.mean(valid_depth)
+                            msg = f"  Depth stats: min={d_min:.2f}m, max={d_max:.2f}m, mean={d_mean:.2f}m, pixels={len(valid_depth)}"
+                            print(msg)
+                            if on_log: on_log(msg)
+                    
+                    # FIX 2b: Apply bilateral filtering for smoother depth
+                    # TEMPORARILY DISABLED - testing without filtering first
+                    # if depth_linear.max() > 0:
+                    #     depth_linear = cv2.bilateralFilter(
+                    #         depth_linear.astype(np.float32), 
+                    #         d=5, 
+                    #         sigmaColor=0.1, 
+                    #         sigmaSpace=0.1
+                    #     )
                         
                     # 3. Compute Camera Pose in Unity World
                     # T_cam_world = T_head_world @ T_cam_head

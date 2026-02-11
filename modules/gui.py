@@ -699,9 +699,10 @@ def main(page: ft.Page):
         label="Camera",
         value=config_manager.get("reconstruction.camera", "left"),
         options=[
-            ft.dropdown.Option("left", "Left Camera"),
-            ft.dropdown.Option("right", "Right Camera"),
+            ft.dropdown.Option("left", "Left Camera (Grayscale)"),
+            ft.dropdown.Option("right", "Right Camera (Grayscale)"),
             ft.dropdown.Option("both", "Stereo (Both)"),
+            ft.dropdown.Option("color", "RGB Camera (Color)"),
         ]
     )
     filter_check = ft.Checkbox(label="Filter Depth", value=config_manager.get("reconstruction.use_confidence_filtered_depth", True))

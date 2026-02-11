@@ -1,0 +1,14 @@
+Python Version: 3.11.9 (tags/v3.11.9:de54cf5, Apr  2 2024, 10:12:12) [MSC v.1938 64 bit (AMD64)]
+Open3D Version: 0.18.0
+PyTorch Version: NOT INSTALLED
+--------------------
+Open3D CUDA Check:
+  Open3D Core CUDA: NOT AVAILABLE (is_available() returned False)
+
+Attempting to create Open3D CUDA device...
+  Successfully created CUDA device: CUDA:0
+  Failed: [Open3D Error] (class std::shared_ptr<class open3d::core::MemoryManagerDevice> __cdecl open3d::core::MemoryManager::GetMemoryManagerDevice(const class open3d::core::Device &)) D:\a\Open3D\Open3D\cpp\open3d\core\MemoryManager.cpp:123: Unsupported device "CUDA:0". Set BUILD_CUDA_MODULE=ON to compile for CUDA support and BUILD_SYCL_MODULE=ON to compile for SYCL support.
+
+--------------------
+Build Information:
+{'BUILD_TENSORFLOW_OPS': False, 'BUILD_PYTORCH_OPS': False, 'BUILD_CUDA_MODULE': False, 'BUILD_SYCL_MODULE': False, 'BUILD_AZURE_KINECT': True, 'BUILD_LIBREALSENSE': True, 'BUILD_SHARED_LIBS': False, 'BUILD_GUI': True, 'ENABLE_HEADLESS_RENDERING': False, 'BUILD_JUPYTER_EXTENSION': True, 'BUNDLE_OPEN3D_ML': False, 'GLIBCXX_USE_CXX11_ABI': True, 'CMAKE_BUILD_TYPE': 'Release', 'CUDA_VERSION': '', 'CUDA_GENCODES': '', 'Tensorflow_VERSION': '', 'Pytorch_VERSION': '', 'WITH_OPENMP': True}

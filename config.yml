@@ -10,11 +10,11 @@ post_processing:
 reconstruction:
   block_count: 50000
   block_resolution: 16
-  camera: left
+  camera: color
   confidence_threshold: 0.05
-  depth_max: 10.0
-  frame_interval: 5
-  trunc_voxel_multiplier: 8.0
-  use_confidence_filtered_depth: true
+  depth_max: 3.0
+  frame_interval: 1
+  trunc_voxel_multiplier: 5.0
+  use_confidence_filtered_depth: false
   valid_count_threshold: 4
-  voxel_size: 0.005
+  voxel_size: 0.03
