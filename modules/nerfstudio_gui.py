@@ -147,13 +147,32 @@ class NerfStudioUI:
         self.psnr_text = ft.Text("", size=11, color=ft.Colors.GREEN_400)
         
         # ====== Results ======
+        # ====== Results ======
         self.btn_open_viewer = ft.ElevatedButton(
             "Open Viewer",
             icon=ft.Icons.VISIBILITY,
             on_click=self._on_open_viewer,
-           visible=False
+            visible=False
         )
         self.output_path_text = ft.Text("", size=11, selectable=True)
+        
+        # ====== Training Logs ======
+        self.training_log = ft.ListView(
+            expand=True,
+            spacing=2,
+            padding=5,
+            auto_scroll=True,
+            height=200
+        )
+        self.training_log_container = ft.Container(
+            content=self.training_log,
+            bgcolor="#1e1e1e",
+            border=ft.border.all(1, ft.Colors.GREY_800),
+            border_radius=5,
+            padding=5,
+            height=200,
+            visible=False # Hidden initially until training starts
+        )
         
         # ====== Training Container (disabled when not installed) ======
         self.training_container = ft.Container(
@@ -170,6 +189,7 @@ class NerfStudioUI:
                 self.eta_text,
                 ft.Row([self.loss_text, self.psnr_text]),
                 ft.Divider(),
+                self.training_log_container, # Add log container here
                 self.btn_open_viewer,
                 self.output_path_text,
             ]),
@@ -473,12 +493,15 @@ class NerfStudioUI:
         self.page.update()
     
     def _update_install_log(self, text: str):
-        """Update installation log (thread-safe)."""
-        current = self.install_log.value
-        lines = current.split('\n') if current else []
-        lines.append(text)
-        # Keep last 10 lines
-        self.install_log.value = '\n'.join(lines[-10:])
+        """Append text to install log."""
+        self.install_log.controls.append(ft.Text(text, size=11, font_family="Consolas"))
+        if len(self.install_log.controls) > 1000:
+            self.install_log.controls.pop(0)
+
+        # Ensure log container is visible
+        if hasattr(self, 'install_log_container'):
+            self.install_log_container.visible = True
+
         self.page.update()
 
     
@@ -518,15 +541,29 @@ class NerfStudioUI:
             method=method,
             max_iterations=max_iters,
             progress_callback=self._on_training_progress,
-            completion_callback=self._on_training_complete
+            completion_callback=self._on_training_complete,
+            log_callback=self._on_training_log
         )
         
-        if not success:
+        if success:
+            self.training_log.controls.clear()
+            self.training_log_container.visible = True
+            self.page.update()
+        else:
             self.btn_train.disabled = False
             self.btn_stop.visible = False
             self.training_progress.visible = False
             self._show_message("Failed to start training")
             self.page.update()
+    
+    def _on_training_log(self, line: str):
+        """Handle raw log output from training."""
+        self.training_log.controls.append(
+            ft.Text(line, size=10, font_family="Consolas", color=ft.Colors.GREEN_400)
+        )
+        if len(self.training_log.controls) > 500: # Limit history
+            self.training_log.controls.pop(0)
+        self.page.update()
     
     def _on_stop_click(self, e):
         """Stop training."""

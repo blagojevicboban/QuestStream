@@ -176,6 +176,8 @@ def main(page: ft.Page):
             )
             
             if rgb is not None:
+                # Ensure cv2 is loaded before use
+                cv2 = _ensure_cv2()
                 # Convert to base64 for Flet
                 is_success, buffer = cv2.imencode(".jpg", cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR))
                 if is_success:

@@ -62,6 +62,7 @@ class NerfStudioTrainer:
         max_iterations: int = 30000,
         progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
         completion_callback: Optional[Callable[[bool, str], None]] = None,
+        log_callback: Optional[Callable[[str], None]] = None,  # New callback
         extra_args: Optional[Dict[str, Any]] = None
     ) -> bool:
         """
@@ -74,6 +75,7 @@ class NerfStudioTrainer:
             max_iterations: Maximum training iterations
             progress_callback: Called with progress updates {step, total, loss, eta}
             completion_callback: Called when done (success: bool, output_path: str)
+            log_callback: Called with raw output lines
             extra_args: Additional command-line arguments
             
         Returns:
@@ -101,20 +103,22 @@ class NerfStudioTrainer:
         
         self.progress_callback = progress_callback
         self.completion_callback = completion_callback
+        self.log_callback = log_callback
         
-        # Build command and find executable
+        # Build command using the python launcher script with SSL patches
         import sys
         import os
-        import certifi
         
-        venv_scripts = os.path.dirname(sys.executable)
-        ns_train_exe = os.path.join(venv_scripts, 'ns-train.exe')
+        # Use our custom launcher script that includes SSL monkey patches
+        launcher_script = os.path.join(os.getcwd(), 'run_nerfstudio.py')
         
-        # Fallback to 'ns-train' if not found in venv (though it should be)
-        executable = ns_train_exe if os.path.exists(ns_train_exe) else 'ns-train'
-        
+        if not os.path.exists(launcher_script):
+            print(f"[NerfStudio] ERROR: Launcher script not found: {launcher_script}")
+            return False
+            
         cmd = [
-            executable,
+            sys.executable,  # Run with current python
+            launcher_script, # The script that patches SSL and calls ns-train entrypoint
             method,
             '--data', str(data_path_obj),
             '--max-num-iterations', str(max_iterations),
@@ -131,18 +135,9 @@ class NerfStudioTrainer:
                 if value is not True:  # Skip value for boolean flags
                     cmd.append(str(value))
         
-        print(f"[NerfStudio] Starting: {' '.join(cmd)}")
+        print(f"[NerfStudio] Starting via launcher: {' '.join(cmd)}")
         
         try:
-            # Fix for Windows SSL errors: [ASN1] nested asn1 error / not enough data
-            # This happens when loading certificates from a corrupted Windows store.
-            # We use certifi and disable global verification as a robust fallback.
-            env = os.environ.copy()
-            ca_bundle = certifi.where()
-            env["SSL_CERT_FILE"] = ca_bundle
-            env["REQUESTS_CA_BUNDLE"] = ca_bundle
-            env["PYTHONHTTPSVERIFY"] = "0"  # Sledgehammer for corrupted Windows cert stores
-            
             # Start process with pipes for output
             self.process = subprocess.Popen(
                 cmd,
@@ -151,7 +146,8 @@ class NerfStudioTrainer:
                 text=True,
                 bufsize=1,
                 universal_newlines=True,
-                env=env,
+                encoding='utf-8',       # Explicitly use UTF-8
+                errors='replace',       # Replace un-decodable bytes instead of crashing
                 creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
             )
             
@@ -167,8 +163,7 @@ class NerfStudioTrainer:
             return True
             
         except FileNotFoundError:
-            print("[NerfStudio] ERROR: 'ns-train' command not found!")
-            print("           Make sure NerfStudio is installed: pip install nerfstudio")
+            print("[NerfStudio] ERROR: Launcher command failed!")
             return False
         except Exception as e:
             print(f"[NerfStudio] Failed to start: {e}")
@@ -185,6 +180,10 @@ class NerfStudioTrainer:
                 if not line:
                     continue
                 
+                # Send raw log first
+                if hasattr(self, 'log_callback') and self.log_callback:
+                    self.log_callback(line)
+
                 # Parse progress from NerfStudio output
                 # Example: "Step 1000/30000 | Loss: 0.0123 | ETA: 5m 30s"
                 progress_info = self._parse_progress_line(line)

@@ -1,12 +1,20 @@
 """Quest Image Processing - YUV to RGB conversion and depth processing."""
 
 import numpy as np
-import cv2
 import json
 import os
 from pathlib import Path
 import struct
 
+# Lazy load cv2
+cv2 = None
+
+def _ensure_cv2():
+    global cv2
+    if cv2 is None:
+        import cv2 as cv2_module
+        cv2 = cv2_module
+    return cv2
 
 class QuestImageProcessor:
     """Processes Quest YUV images and raw depth maps."""
@@ -58,6 +66,8 @@ class QuestImageProcessor:
         y_plane = np.frombuffer(yuv_data[:y_size], dtype=np.uint8).reshape((height, width))
         u_plane = np.frombuffer(yuv_data[y_size:y_size + uv_size], dtype=np.uint8).reshape((height // 2, width // 2))
         v_plane = np.frombuffer(yuv_data[y_size + uv_size:y_size + 2 * uv_size], dtype=np.uint8).reshape((height // 2, width // 2))
+        
+        cv2 = _ensure_cv2()
         
         # Upsample U and V to full resolution
         u_upsampled = cv2.resize(u_plane, (width, height), interpolation=cv2.INTER_LINEAR)
@@ -175,6 +185,9 @@ class QuestImageProcessor:
             
             # Auto-detect image format by extension
             image_ext = image_path.suffix.lower()
+            
+            # Use local cv2 reference
+            cv2 = _ensure_cv2()
             
             # NEW FORMAT: JPG/PNG
             if image_ext in ['.jpg', '.jpeg', '.png']:
