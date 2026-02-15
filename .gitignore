@@ -22,3 +22,6 @@ dist/
 *.log
 output.ply
 QuestStream.egg-info/
+nerfstudio_venv/
+outputs/
+temp/

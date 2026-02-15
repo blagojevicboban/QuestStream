@@ -37,12 +37,35 @@ class NerfStudioUI:
         """Start background installation check. Call this after page is fully loaded."""
         threading.Thread(target=self._check_installation_async, daemon=True).start()
     
+    def _get_nerfstudio_python(self) -> str:
+        """Get path to the dedicated NerfStudio python executable."""
+        # Use a separate venv for NerfStudio to avoid conflicts
+        venv_name = "nerfstudio_venv"
+        return os.path.abspath(os.path.join(os.getcwd(), venv_name, "Scripts", "python.exe"))
+
     def _check_installation_async(self):
         """Check if NerfStudio is installed (in background)."""
         import time
         time.sleep(0.5)  # Small delay to ensure page is ready
         
-        self.is_installed = NerfStudioTrainer.check_installation()
+        ns_python = self._get_nerfstudio_python()
+        
+        # Check if python exists in separate env
+        if not os.path.exists(ns_python):
+            self.is_installed = False
+        else:
+            # Check if nerfstudio is importable in that env
+            try:
+                cmd = [ns_python, "-c", "import nerfstudio; print('ok')"]
+                result = subprocess.run(
+                    cmd, 
+                    stdout=subprocess.PIPE, 
+                    stderr=subprocess.PIPE, 
+                    creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
+                )
+                self.is_installed = (result.returncode == 0)
+            except:
+                self.is_installed = False
         
         # Update UI on main thread (safely)
         try:
@@ -53,11 +76,11 @@ class NerfStudioUI:
                 self.page.run_task(self._update_installation_status)
             except:
                 pass  # Silently fail if page still not ready
-    
+
     def _update_installation_status(self):
         """Update UI based on installation status."""
         if self.is_installed:
-            self.install_status_text.value = "✅ NerfStudio Installed"
+            self.install_status_text.value = "✅ NerfStudio Installed (Dedicated Env)"
             self.install_status_text.color = ft.Colors.GREEN
             self.btn_install.text = "Update NerfStudio"
             self.btn_install.icon = ft.Icons.SYSTEM_UPDATE
@@ -67,7 +90,7 @@ class NerfStudioUI:
         else:
             self.install_status_text.value = "❌ NerfStudio Not Found"
             self.install_status_text.color = ft.Colors.RED
-            self.btn_install.text = "Install NerfStudio"
+            self.btn_install.text = "Install NerfStudio (Safe Mode)"
             self.btn_install.icon = ft.Icons.DOWNLOAD
             self.btn_uninstall.visible = False  # Hide uninstall when not installed
             self.training_container.disabled = True
@@ -94,7 +117,24 @@ class NerfStudioUI:
             color=ft.Colors.WHITE
         )
         self.install_progress = ft.ProgressBar(visible=False)
-        self.install_log = ft.Text("", size=11, font_family="Consolas")
+        
+        # Use ListView for install log to enable scrolling
+        self.install_log = ft.ListView(
+            expand=True,
+            spacing=2,
+            padding=5,
+            auto_scroll=True,
+            height=150
+        )
+        self.install_log_container = ft.Container(
+            content=self.install_log,
+            bgcolor="#1e1e1e",
+            border=ft.border.all(1, ft.Colors.GREY_800),
+            border_radius=5,
+            padding=5,
+            height=150,
+            visible=False # Hidden initially
+        )
         
         # ====== Training Configuration ======
         self.method_dropdown = ft.Dropdown(
@@ -226,7 +266,7 @@ class NerfStudioUI:
                             self.install_status_text,
                             ft.Row([self.btn_install, self.btn_uninstall]),
                             self.install_progress,
-                            self.install_log,
+                            self.install_log_container,
                         ]),
                         padding=15,
                         bgcolor="#2a2a2a",
@@ -359,131 +399,84 @@ class NerfStudioUI:
             self.page.update()
     
     def _install_nerfstudio(self):
-        """Install/update NerfStudio using pip (Windows-safe, 3-step process)."""
+        """Install/update NerfStudio in dedicated env."""
         import sys
         
+        target_python = self._get_nerfstudio_python()
+        venv_dir = os.path.dirname(os.path.dirname(target_python)) # .../nerfstudio_venv
+        
         try:
-            self._update_install_log("Installing NerfStudio (this may take 10-15 minutes)...")
-            self._update_install_log("Using Windows-safe 3-step installation...")
+            self._update_install_log(f"Creating dedicated environment in: {venv_dir}...")
             
-            # ===== STEP 1: Core Package =====
-            self._update_install_log("Step 1/3: Installing NerfStudio core...")
-            
-            core_cmd = [
-                sys.executable,
-                '-m', 'pip',
-                'install',
-                '-U',
-                'nerfstudio',
-                '--no-warn-script-location',
-                '--force-reinstall',
-                '--no-deps'  # No dependencies yet
+            # 1. Create venv if not exists
+            if not os.path.exists(target_python):
+                import venv
+                self._update_install_log("Initializing new virtual environment...")
+                venv.create(venv_dir, with_pip=True)
+                self._update_install_log("✅ Environment created.")
+
+            # 2. Upgrade pip
+            self._update_install_log("Upgrading pip...")
+            subprocess.run([target_python, "-m", "pip", "install", "--upgrade", "pip"], 
+                           creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0)
+
+            # 3. Install PyTorch with CUDA (Critical Step!)
+            self._update_install_log("Step 1/3: Installing PyTorch with CUDA support...")
+            torch_cmd = [
+                target_python, "-m", "pip", "install", 
+                "torch", "torchvision", "torchaudio",
+                "--index-url", "https://download.pytorch.org/whl/cu121",
+                "--no-cache-dir"
             ]
             
-            process1 = subprocess.Popen(
-                core_cmd,
+            proc = subprocess.Popen(
+                torch_cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
-                bufsize=1,
                 creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
-            )
-            
-            for line in process1.stdout:
-                line = line.strip()
-                if line:
-                    self._update_install_log(line)
-            
-            if process1.wait() != 0:
-                self._update_install_log(f"❌ Step 1 failed")
-                self.on_log("NerfStudio core installation failed")
-                return
-            
-            # ===== STEP 2: Critical Dependencies =====
-            self._update_install_log("Step 2/3: Installing critical dependencies...")
-            
-            # These are essential for NerfStudio to run
-            critical_deps = ['rich', 'tyro', 'mediapy', 'nerfacc', 'gsplat', 'ninja', 'viser', 'torchmetrics', 'fpsample', 'wandb', 'tensorboard', 'pathos', 'scikit-image', 'scikit-learn', 'plyfile', 'pytorch-msssim', 'pyshac', 'xatlas', 'trimesh', 'tensorly', 'comet-ml', 'python-socketio', 'python-engineio']
-            
-            for dep in critical_deps:
-                self._update_install_log(f"  → Installing {dep}...")
-                
-                dep_cmd = [
-                    sys.executable,
-                    '-m', 'pip',
-                    'install',
-                    '-U',
-                    dep,
-                    '--no-warn-script-location'
-                ]
-                
-                process_dep = subprocess.Popen(
-                    dep_cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    bufsize=1,
-                    creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
-                )
-                
-                # Don't spam logs with every line for deps
-                for line in process_dep.stdout:
-                    if 'ERROR' in line or 'Successfully' in line:
-                        self._update_install_log(f"    {line.strip()}")
-                
-                ret = process_dep.wait()
-                if ret == 0:
-                    self._update_install_log(f"    ✅ {dep} installed")
-                else:
-                    self._update_install_log(f"    ⚠️  {dep} failed (exit {ret}) - may still work")
-            
-            # ===== STEP 3: Remaining Dependencies =====
-            self._update_install_log("Step 3/3: Installing remaining dependencies...")
-            
-            full_cmd = [
-                sys.executable,
-                '-m', 'pip',
-                'install',
-                'nerfstudio',
-                '--no-warn-script-location'
+            ) 
+            for line in proc.stdout:
+                if line.strip(): self._update_install_log(line.strip())
+            proc.wait()
+
+            # 4. Install NerfStudio & Dependencies
+            self._update_install_log("Step 2/3: Installing NerfStudio & core libs...")
+            ns_cmd = [
+                target_python, "-m", "pip", "install", 
+                "nerfstudio", "gsplat", "nerfacc", "viser", "tensorboard",
+                "--no-warn-script-location"
             ]
             
-            process3 = subprocess.Popen(
-                full_cmd,
+            proc = subprocess.Popen(
+                ns_cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
-                bufsize=1,
                 creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
             )
+            for line in proc.stdout:
+                 if line.strip(): self._update_install_log(line.strip())
             
-            for line in process3.stdout:
-                line = line.strip()
-                if line and ('ERROR' in line or 'Successfully' in line or 'Requirement' in line):
-                    self._update_install_log(line)
-            
-            return_code = process3.wait()
-            
-            # Evaluation - even partial success is OK
-            if return_code == 0:
-                self._update_install_log("✅ Full installation successful!")
-                self.on_log("NerfStudio installed successfully")
+            if proc.wait() == 0:
+                self._update_install_log("✅ Installation successful!")
+                self.is_installed = True
+                self.on_log("NerfStudio installed in dedicated env")
             else:
-                self._update_install_log(f"⚠️  Partial installation (core + critical deps installed)")
-                self._update_install_log(f"   Some optional dependencies may be missing (exit code: {return_code})")
-                self._update_install_log(f"   This is usually OK - training should work!")
-                self.on_log("NerfStudio installed (core + critical dependencies)")
+                self._update_install_log("❌ Installation failed.")
             
-            # Always re-check
-            threading.Thread(target=self._check_installation_async, daemon=True).start()
+            # Refresh status
+            self._check_installation_async()
             
         except Exception as ex:
             self._update_install_log(f"❌ Error: {ex}")
-            self.on_log(f"NerfStudio installation error: {ex}")
             import traceback
-            self._update_install_log(f"Details: {traceback.format_exc()}")
+            self._update_install_log(traceback.format_exc())
         
         finally:
+            self.btn_install.disabled = False
+            self.install_progress.visible = False
+            self.page.update()
             self._installation_complete()
     
     def _installation_complete(self):

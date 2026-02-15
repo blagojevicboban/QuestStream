@@ -117,7 +117,7 @@ class NerfStudioTrainer:
             return False
             
         cmd = [
-            sys.executable,  # Run with current python
+            self._get_python_path(),  # Run with current python or dedicated venv python
             launcher_script, # The script that patches SSL and calls ns-train entrypoint
             method,
             '--data', str(data_path_obj),
@@ -215,8 +215,17 @@ class NerfStudioTrainer:
         except Exception as e:
             print(f"[NerfStudio] Monitoring error: {e}")
             self.is_running = False
-    
-    def _parse_progress_line(self, line: str) -> Optional[Dict[str, Any]]:
+    def _get_python_path(self) -> str:
+        """Get path to python executable in dedicated venv."""
+        import sys
+        import os
+        
+        # Check for dedicated venv path
+        venv_path = os.path.abspath(os.path.join(os.getcwd(), "nerfstudio_venv", "Scripts", "python.exe"))
+        if os.path.exists(venv_path):
+            return venv_path
+            
+        return sys.executable
         """
         Parse progress information from NerfStudio output line.
         
