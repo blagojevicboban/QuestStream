@@ -272,7 +272,7 @@ class NerfStudioUI:
             self.on_log(f"NerfStudio installation error: {ex}")
         
         finally:
-            self.page.run_task(self._installation_complete)
+            self._installation_complete()
     
     def _installation_complete(self):
         """Called when installation finishes."""
@@ -282,15 +282,13 @@ class NerfStudioUI:
     
     def _update_install_log(self, text: str):
         """Update installation log (thread-safe)."""
-        def update():
-            current = self.install_log.value
-            lines = current.split('\n') if current else []
-            lines.append(text)
-            # Keep last 10 lines
-            self.install_log.value = '\n'.join(lines[-10:])
-            self.page.update()
-        
-        self.page.run_task(update)
+        current = self.install_log.value
+        lines = current.split('\n') if current else []
+        lines.append(text)
+        # Keep last 10 lines
+        self.install_log.value = '\n'.join(lines[-10:])
+        self.page.update()
+
     
     def _on_train_click(self, e):
         """Start training."""
@@ -347,54 +345,48 @@ class NerfStudioUI:
     
     def _on_training_progress(self, info: dict):
         """Handle training progress updates."""
-        def update():
-            step = info.get('step', 0)
-            total = info.get('total_steps', 30000)
-            loss = info.get('loss')
-            psnr = info.get('psnr')
-            eta = info.get('eta_seconds')
-            
-            # Update progress bar
-            if total > 0:
-                self.training_progress.value = step / total
-            
-            # Update text
-            self.progress_text.value = f"Step {step:,} / {total:,}"
-            
-            if eta is not None:
-                minutes = eta // 60
-                seconds = eta % 60
-                self.eta_text.value = f"ETA: {minutes}m {seconds}s"
-            
-            if loss is not None:
-                self.loss_text.value = f"Loss: {loss:.5f}"
-            
-            if psnr is not None:
-                self.psnr_text.value = f"PSNR: {psnr:.2f} dB"
-            
-            self.page.update()
+        step = info.get('step', 0)
+        total = info.get('total_steps', 30000)
+        loss = info.get('loss')
+        psnr = info.get('psnr')
+        eta = info.get('eta_seconds')
         
-        self.page.run_task(update)
+        # Update progress bar
+        if total > 0:
+            self.training_progress.value = step / total
+        
+        # Update text
+        self.progress_text.value = f"Step {step:,} / {total:,}"
+        
+        if eta is not None:
+            minutes = eta // 60
+            seconds = eta % 60
+            self.eta_text.value = f"ETA: {minutes}m {seconds}s"
+        
+        if loss is not None:
+            self.loss_text.value = f"Loss: {loss:.5f}"
+        
+        if psnr is not None:
+            self.psnr_text.value = f"PSNR: {psnr:.2f} dB"
+        
+        self.page.update()
     
     def _on_training_complete(self, success: bool, output_path: str):
         """Handle training completion."""
-        def update():
-            self.btn_train.disabled = False
-            self.btn_stop.visible = False
-            self.training_progress.visible = False
-            
-            if success:
-                self.on_log(f"✅ Training completed! Output: {output_path}")
-                self.output_path_text.value = f"Model saved: {output_path}"
-                self.btn_open_viewer.visible = True
-                self._show_message("Training completed successfully!")
-            else:
-                self.on_log("❌ Training failed or was cancelled")
-                self._show_message("Training failed or was cancelled")
-            
-            self.page.update()
+        self.btn_train.disabled = False
+        self.btn_stop.visible = False
+        self.training_progress.visible = False
         
-        self.page.run_task(update)
+        if success:
+            self.on_log(f"✅ Training completed! Output: {output_path}")
+            self.output_path_text.value = f"Model saved: {output_path}"
+            self.btn_open_viewer.visible = True
+            self._show_message("Training completed successfully!")
+        else:
+            self.on_log("❌ Training failed or was cancelled")
+            self._show_message("Training failed or was cancelled")
+        
+        self.page.update()
     
     def _on_open_viewer(self, e):
         """Open NerfStudio viewer."""

@@ -5,6 +5,11 @@
 ### 🎯 Summary
 Added **NerfStudio training integration** for color-only reconstruction and full support for the new **QuestGear3DScan** data format. QuestGear3DStudio can now train Gaussian Splatting and NeRF models directly from the GUI while maintaining backward compatibility with legacy formats.
 
+**🐛 Bug Fixes:**
+- Fixed `AssertionError` in `page.run_task()` by using direct `page.update()` calls (thread-safe in Flet)
+- Fixed initialization order to prevent crashes on GUI startup
+
+
 ### ✨ Changes
 
 #### 1. **`modules/quest_adapter.py`**
