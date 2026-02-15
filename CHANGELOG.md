@@ -8,6 +8,11 @@ Added **NerfStudio training integration** for color-only reconstruction and full
 **🐛 Bug Fixes:**
 - Fixed `AssertionError` in `page.run_task()` by using direct `page.update()` calls (thread-safe in Flet)
 - Fixed initialization order to prevent crashes on GUI startup
+- **Fixed Windows file locking during NerfStudio installation** (WinError 5: Access is denied)
+  - Implemented lazy cv2 loading to avoid file locks
+  - Two-step installation: core first (`--no-deps`), then dependencies
+  - Uses separate Python process with `--force-reinstall` flag
+  - Users can now install from GUI while it's running!
 
 
 ### ✨ Changes

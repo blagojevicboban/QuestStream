@@ -18,7 +18,18 @@ except ImportError:
     HAS_OPEN3D = False
     o3d = None
 
-import cv2
+# Lazy import cv2 to avoid file locking during NerfStudio installation
+# cv2 will be imported on-demand when actually needed
+cv2 = None
+
+def _ensure_cv2():
+    """Lazy-load cv2 module when needed."""
+    global cv2
+    if cv2 is None:
+        import cv2 as cv2_module
+        cv2 = cv2_module
+    return cv2
+
 import base64
 from .config_manager import ConfigManager
 from .ingestion import ZipValidator, AsyncExtractor

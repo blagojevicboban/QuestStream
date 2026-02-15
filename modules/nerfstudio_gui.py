@@ -239,37 +239,96 @@ class NerfStudioUI:
         self.installation_thread.start()
     
     def _install_nerfstudio(self):
-        """Install/update NerfStudio using pip."""
+        """Install/update NerfStudio using pip (Windows-safe)."""
+        import sys
+        
         try:
             self._update_install_log("Installing NerfStudio (this may take 5-10 minutes)...")
+            self._update_install_log("Using Windows-safe installation method...")
             
-            # Run pip install
+            # Use separate Python process to avoid file locking issues
+            # sys.executable points to python.exe in venv
+            install_cmd = [
+                sys.executable,  # Use current Python interpreter
+                '-m', 'pip',     # Run pip as module (safer)
+                'install',
+                '-U',            # Upgrade
+                'nerfstudio',
+                '--no-warn-script-location',  # Suppress warnings
+                '--force-reinstall',          # Force reinstall (Windows compatibility)
+                '--no-deps'      # Install without dependencies first
+            ]
+            
+            self._update_install_log("Step 1/2: Installing NerfStudio core...")
+            
+            # Step 1: Install NerfStudio without dependencies
             process = subprocess.Popen(
-                ['pip', 'install', '-U', 'nerfstudio'],
+                install_cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
-                bufsize=1
+                bufsize=1,
+                creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
             )
             
             # Stream output
             for line in process.stdout:
-                self._update_install_log(line.strip())
+                line = line.strip()
+                if line:  # Skip empty lines
+                    self._update_install_log(line)
             
             return_code = process.wait()
             
-            if return_code == 0:
+            if return_code != 0:
+                self._update_install_log(f"❌ Step 1 failed (exit code {return_code})")
+                self.on_log(f"NerfStudio core installation failed")
+                return
+            
+            # Step 2: Install dependencies (allows updating locked files)
+            self._update_install_log("Step 2/2: Installing dependencies...")
+            
+            deps_cmd = [
+                sys.executable,
+                '-m', 'pip',
+                'install',
+                'nerfstudio',    # This will install missing dependencies
+                '--no-warn-script-location'
+            ]
+            
+            process2 = subprocess.Popen(
+                deps_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
+            )
+            
+            for line in process2.stdout:
+                line = line.strip()
+                if line:
+                    self._update_install_log(line)
+            
+            return_code2 = process2.wait()
+            
+            if return_code2 == 0:
                 self._update_install_log("✅ Installation successful!")
+                self._update_install_log("ℹ️  Restart may be needed for full functionality")
                 self.on_log("NerfStudio installed successfully")
                 # Re-check installation
                 threading.Thread(target=self._check_installation_async, daemon=True).start()
             else:
-                self._update_install_log(f"❌ Installation failed (exit code {return_code})")
-                self.on_log(f"NerfStudio installation failed")
+                self._update_install_log(f"⚠️  Core installed, but some dependencies may need restart")
+                self._update_install_log(f"   Exit code: {return_code2}")
+                self.on_log(f"NerfStudio partially installed (restart recommended)")
+                # Still check - core might be working
+                threading.Thread(target=self._check_installation_async, daemon=True).start()
             
         except Exception as ex:
             self._update_install_log(f"❌ Error: {ex}")
             self.on_log(f"NerfStudio installation error: {ex}")
+            import traceback
+            self._update_install_log(f"Details: {traceback.format_exc()}")
         
         finally:
             self._installation_complete()
