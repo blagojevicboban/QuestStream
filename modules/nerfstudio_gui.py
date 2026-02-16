@@ -57,14 +57,16 @@ class NerfStudioUI:
             # Check if nerfstudio is importable in that env
             try:
                 cmd = [ns_python, "-c", "import nerfstudio; print('ok')"]
+                # Use subprocess to check without raising exception if module missing
                 result = subprocess.run(
                     cmd, 
                     stdout=subprocess.PIPE, 
                     stderr=subprocess.PIPE, 
-                    creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
+                    creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0,
+                    check=False  # Don't raise CalledProcessError
                 )
                 self.is_installed = (result.returncode == 0)
-            except:
+            except Exception:
                 self.is_installed = False
         
         # Update UI on main thread (safely)
@@ -313,22 +315,26 @@ class NerfStudioUI:
     def _on_uninstall_click(self, e):
         """Show confirmation dialog for uninstallation."""
         def close_dlg(e):
-            self.page.close(dlg)
+            dlg.open = False
+            self.page.update()
             
         def confirm_uninstall(e):
-            self.page.close(dlg)
+            dlg.open = False
+            self.page.update()
             self._do_uninstall()
 
         dlg = ft.AlertDialog(
             title=ft.Text("Uninstall NerfStudio?"),
             content=ft.Text("This will remove NerfStudio and all its dependencies from the virtual environment. This cannot be undone."),
             actions=[
-                ft.TextButton("Yes, Uninstall", on_click=confirm_uninstall, color=ft.Colors.RED),
                 ft.TextButton("Cancel", on_click=close_dlg),
+                ft.TextButton("Yes, Uninstall", on_click=confirm_uninstall, style=ft.ButtonStyle(color=ft.Colors.RED)),
             ],
             actions_alignment=ft.MainAxisAlignment.END,
         )
-        self.page.open(dlg)
+        dlg.open = True
+        self.page.overlay.append(dlg)
+        self.page.update()
 
     def _do_uninstall(self):
         """Start the uninstallation thread."""
@@ -442,9 +448,32 @@ class NerfStudioUI:
 
             # 4. Install NerfStudio & Dependencies
             self._update_install_log("Step 2/3: Installing NerfStudio & core libs...")
+            
+            # gsplat needs special handling - install from official wheel repo with CUDA binaries
+            self._update_install_log("  → Installing gsplat with CUDA support...")
+            gsplat_cmd = [
+                target_python, "-m", "pip", "install", 
+                "gsplat",
+                "--find-links", "https://docs.gsplat.studio/whl/",
+                "--no-cache-dir"
+            ]
+            proc_gsplat = subprocess.Popen(
+                gsplat_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
+            )
+            for line in proc_gsplat.stdout:
+                 if line.strip() and ('ERROR' in line or 'Successfully' in line): 
+                     self._update_install_log(f"    {line.strip()}")
+            proc_gsplat.wait()
+            
+            # Install remaining components
+            self._update_install_log("  → Installing nerfstudio and dependencies...")
             ns_cmd = [
                 target_python, "-m", "pip", "install", 
-                "nerfstudio", "gsplat", "nerfacc", "viser", "tensorboard",
+                "nerfstudio", "nerfacc", "viser", "tensorboard",
                 "--no-warn-script-location"
             ]
             
@@ -459,9 +488,35 @@ class NerfStudioUI:
                  if line.strip(): self._update_install_log(line.strip())
             
             if proc.wait() == 0:
-                self._update_install_log("✅ Installation successful!")
-                self.is_installed = True
-                self.on_log("NerfStudio installed in dedicated env")
+                # Verify gsplat installation (silently)
+                try:
+                    verify_cmd = [target_python, "-c", "from gsplat import csrc; print('OK')"]
+                    verify_result = subprocess.run(
+                        verify_cmd, 
+                        capture_output=True, 
+                        text=True,
+                        stderr=subprocess.DEVNULL,  # Suppress error output to avoid debugger breaks
+                        creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0,
+                        timeout=10  # Prevent hanging
+                    )
+                    gsplat_ok = (verify_result.returncode == 0)
+                except Exception:
+                    gsplat_ok = False
+                
+                if not gsplat_ok:
+                    self._update_install_log("⚠️  gsplat installation incomplete (missing CUDA binaries)")
+                    self._update_install_log("ℹ️  This is a known issue on Windows.")
+                    self._update_install_log("📌 SOLUTION: Use 'nerfacto' method instead of 'splatfacto'")
+                    self._update_install_log("   OR install Visual Studio Build Tools:")
+                    self._update_install_log("   https://visualstudio.microsoft.com/downloads/")
+                    self._update_install_log("")
+                    self._update_install_log("✅ NerfStudio installed (nerfacto method available)")
+                    self.is_installed = True
+                    self.on_log("NerfStudio installed (nerfacto only - gsplat build failed)")
+                else:
+                    self._update_install_log("✅ Installation successful (all methods available)!")
+                    self.is_installed = True
+                    self.on_log("NerfStudio installed in dedicated env")
             else:
                 self._update_install_log("❌ Installation failed.")
             

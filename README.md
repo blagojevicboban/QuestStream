@@ -24,7 +24,7 @@
 - 🚀 **GPU Acceleration**: Built on **Open3D Tensor API**, utilizing CUDA for 10x-50x faster reconstruction.
 - ⚡ **Asynchronous Pipeline**: Fast data processing without freezing the interface.
 - 🎨 **Modern Deep UI**: Elegant interface built using the **Flet** platform with dynamic progress bars.
-- ⭐ **NerfStudio Integration**: Train Gaussian Splatting and NeRF models directly from GUI (color-only supported!)
+- ⭐ **NerfStudio Integration**: **One-Click Automated Install**! Train Gaussian Splatting and NeRF models directly from the GUI (isolated environment included). [See Guide](./NERFSTUDIO_GUIDE.md)
 - 🛠️ **Advanced Processing**:
   - **YUV_420_888 Conversion**: Automatic conversion of Quest raw formats to RGB.
   - **JPG/PNG Support**: Modern image formats with auto-detection

@@ -226,40 +226,65 @@ class NerfStudioTrainer:
             return venv_path
             
         return sys.executable
+
+    def _parse_progress_line(self, line: str) -> Optional[Dict[str, Any]]:
         """
         Parse progress information from NerfStudio output line.
-        
-        Returns dict with: step, total_steps, loss, psnr, eta_seconds
+        Supports both old format and new tabular format:
+        Old: "Step 1000/30000 | train_loss: 0.0123"
+        New: "100 ( 0.33%)       0            1.23s                1h12m"
         """
-        # NerfStudio typically outputs progress like:
-        # "Step (% 7d) / (%7d): (loss=%0.5f)"
-        # or with PSNR: "Step 1000/30000 | train_loss: 0.0123 | train_psnr: 25.4"
+        line = line.strip()
         
-        # Try to extract step number
+        # 1. New Tabular Format: "Step (% Done)..." header usually precedes data lines
+        # Data line example: "50 (0.17%) 154.00 µs 12s 6.50 M" (fields vary)
+        # We look for: Number + space + (Percentage%)
+        
+        # Regex for: Step (Progress%) ... ETA
+        # Matches: "  100 ( 0.33%) ... 12m 30s ..." 
+        tabular_match = re.search(r'^\s*(\d+)\s*\(\s*([0-9.]+)%\s*\).*?((?:\d+[hm]\s*)+\d*s?)', line)
+        
+        if tabular_match:
+            step = int(tabular_match.group(1))
+            percentage = float(tabular_match.group(2))
+            eta_str = tabular_match.group(3).strip()
+            
+            # Calculate total steps from percentage if possible
+            total_steps = int(step / (percentage / 100.0)) if percentage > 0 else 30000
+            
+            # Parse ETA string "1h 12m 30s" -> seconds
+            eta_seconds = 0
+            # Simple parse for h/m/s
+            parts = re.findall(r'(\d+)([hms])', eta_str)
+            for val, unit in parts:
+                if unit == 'h': eta_seconds += int(val) * 3600
+                elif unit == 'm': eta_seconds += int(val) * 60
+                elif unit == 's': eta_seconds += int(val)
+
+            return {
+                'step': step,
+                'total_steps': total_steps,
+                'loss': None, # New format might not show loss inline
+                'psnr': None,
+                'eta_seconds': eta_seconds
+            }
+
+        # 2. Old Format Fallback
         step_match = re.search(r'Step\s+(\d+)', line, re.IGNORECASE)
         total_match = re.search(r'/\s*(\d+)', line)
         loss_match = re.search(r'loss[:\s=]+([0-9.]+)', line, re.IGNORECASE)
         psnr_match = re.search(r'psnr[:\s=]+([0-9.]+)', line, re.IGNORECASE)
-        eta_match = re.search(r'ETA[:\s]+(\d+)m?\s*(\d+)?s?', line, re.IGNORECASE)
         
-        if not step_match:
-            return None
-        
-        result = {
-            'step': int(step_match.group(1)),
-            'total_steps': int(total_match.group(1)) if total_match else None,
-            'loss': float(loss_match.group(1)) if loss_match else None,
-            'psnr': float(psnr_match.group(1)) if psnr_match else None,
-            'eta_seconds': None
-        }
-        
-        # Parse ETA
-        if eta_match:
-            minutes = int(eta_match.group(1)) if eta_match.group(1) else 0
-            seconds = int(eta_match.group(2)) if eta_match.group(2) else 0
-            result['eta_seconds'] = minutes * 60 + seconds
-        
-        return result
+        if step_match:
+            return {
+                'step': int(step_match.group(1)),
+                'total_steps': int(total_match.group(1)) if total_match else None,
+                'loss': float(loss_match.group(1)) if loss_match else None,
+                'psnr': float(psnr_match.group(1)) if psnr_match else None,
+                'eta_seconds': None
+            }
+            
+        return None
     
     def _find_output_path(self) -> str:
         """
